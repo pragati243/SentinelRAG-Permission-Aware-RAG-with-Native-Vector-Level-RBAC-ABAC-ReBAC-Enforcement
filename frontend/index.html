@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SentinelRAG — Permission-Aware RAG with Native Vector RBAC</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="navbar">
+            <div class="logo-group">
+                <div class="shield-icon">🛡️</div>
+                <div>
+                    <h1>SentinelRAG</h1>
+                    <span class="subtitle">RBAC / ABAC / ReBAC Enforced Retrieval Engine</span>
+                </div>
+            </div>
+            <div class="persona-selector-container">
+                <label for="persona-select">Active Identity Persona:</label>
+                <select id="persona-select" class="persona-dropdown">
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Active Identity Status Banner -->
+            <div class="identity-banner" id="identity-banner">
+                <div class="user-avatar" id="user-avatar">👤</div>
+                <div class="user-details">
+                    <div class="user-name-role">
+                        <strong id="user-name">Loading identity...</strong> 
+                        <span class="badge role-badge" id="user-role">Role</span>
+                        <span class="badge dept-badge" id="user-dept">Department</span>
+                    </div>
+                    <div class="user-permissions-meta">
+                        <span>Clearance Level: <strong id="user-clearance">--</strong></span> | 
+                        <span>Allowed Tiers: <strong id="user-tiers">--</strong></span> | 
+                        <span>ReBAC Projects: <strong id="user-projects">--</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div class="tab-bar">
+                <button class="tab-btn active" data-tab="workbench">💬 Query Workbench</button>
+                <button class="tab-btn" data-tab="side-by-side">⚡ Naive vs. SentinelRAG Visualizer</button>
+                <button class="tab-btn" data-tab="debugger">🔍 Permission Debugger</button>
+                <button class="tab-btn" data-tab="red-team">🎯 Red-Team Security Suite</button>
+                <button class="tab-btn" data-tab="audit">🔗 Hash Audit Chain</button>
+            </div>
+
+            <!-- TAB 1: Query Workbench -->
+            <section id="workbench" class="tab-content active">
+                <div class="card search-card">
+                    <div class="input-group">
+                        <input type="text" id="query-input" placeholder="Ask a question (e.g., 'What is the executive bonus structure?' or 'What is parental leave?')..." value="What is the executive severance package?">
+                        <button id="ask-btn" class="btn btn-primary">Submit Query</button>
+                    </div>
+                    <div class="preset-queries">
+                        <span class="preset-label">Preset Queries:</span>
+                        <button class="chip" data-query="What is the executive severance package?">Executive Severance (Restricted HR)</button>
+                        <button class="chip" data-query="What is the Q3 customer churn and operating margin?">Q3 Churn & Margin (Confidential Finance)</button>
+                        <button class="chip" data-query="What are the NDA terms for Project Alpha?">Project Alpha NDA (ReBAC Legal)</button>
+                        <button class="chip" data-query="What is the parental leave policy?">Parental Leave Policy (Public HR)</button>
+                    </div>
+                </div>
+
+                <div class="response-container">
+                    <div class="card answer-card">
+                        <h3>🤖 SentinelRAG Answer</h3>
+                        <div id="answer-box" class="answer-box">
+                            <p class="placeholder-text">Submit a query to generate grounded permissioned response...</p>
+                        </div>
+                        <div class="denied-meta" id="denied-meta" style="display: none;">
+                            <span class="shield-badge">🔒 Qdrant Filter Enforced</span>
+                            <span id="denied-count-text">0 candidate chunks filtered out inside vector index</span>
+                        </div>
+                    </div>
+
+                    <div class="card chunks-card">
+                        <h3>📚 Retrieved Context Chunks (Permitted Only)</h3>
+                        <div id="chunks-list" class="chunks-list">
+                            <p class="placeholder-text">No chunks retrieved yet.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 2: Side-by-Side Naive vs SentinelRAG -->
+            <section id="side-by-side" class="tab-content">
+                <div class="card search-card">
+                    <div class="input-group">
+                        <input type="text" id="sbs-query-input" value="What is the executive severance package?" placeholder="Enter query for side-by-side comparison...">
+                        <button id="sbs-btn" class="btn btn-accent">Run Side-by-Side Analysis</button>
+                    </div>
+                </div>
+
+                <div class="sbs-grid">
+                    <!-- Naive RAG Column -->
+                    <div class="card sbs-card naive-card">
+                        <div class="sbs-header danger-header">
+                            <h3>⚠️ Naive Unfiltered RAG</h3>
+                            <span class="status-pill status-danger">LEAKAGE RISK HIGH</span>
+                        </div>
+                        <p class="sbs-sub">Retrieves top-k nearest vectors without authorization filtering.</p>
+                        <div class="sbs-body">
+                            <h4>Generated Answer:</h4>
+                            <div id="naive-answer" class="answer-box naive-box">--</div>
+                            <h4>Retrieved Chunks (<span id="naive-count">0</span>):</h4>
+                            <div id="naive-chunks" class="chunks-list">--</div>
+                        </div>
+                    </div>
+
+                    <!-- SentinelRAG Column -->
+                    <div class="card sbs-card sentinel-card">
+                        <div class="sbs-header success-header">
+                            <h3>🛡️ SentinelRAG (Filtered ANN)</h3>
+                            <span class="status-pill status-success">SECURE (0% LEAK)</span>
+                        </div>
+                        <p class="sbs-sub">Payload filter executed INSIDE Qdrant vector index traversal.</p>
+                        <div class="sbs-body">
+                            <h4>Generated Answer:</h4>
+                            <div id="sentinel-answer" class="answer-box sentinel-box">--</div>
+                            <h4>Retrieved Chunks (<span id="sentinel-count">0</span>):</h4>
+                            <div id="sentinel-chunks" class="chunks-list">--</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 3: Permission Debugger -->
+            <section id="debugger" class="tab-content">
+                <div class="card">
+                    <h3>🔍 Resolved Effective Permission Set</h3>
+                    <p>Calculated fresh at query-time by `PermissionResolver`. Never trusts client-side authorization claims.</p>
+                    <pre id="permission-json" class="code-block">Loading permissions...</pre>
+                </div>
+            </section>
+
+            <!-- TAB 4: Red-Team Security Suite -->
+            <section id="red-team" class="tab-content">
+                <div class="card">
+                    <div class="header-action">
+                        <div>
+                            <h3>🎯 Red-Team Security Evaluation Harness</h3>
+                            <p>Executes battery of adversarial rephrasing, ReBAC staffing, and fail-closed security tests.</p>
+                        </div>
+                        <button id="run-eval-btn" class="btn btn-primary">Execute Red-Team Suite</button>
+                    </div>
+
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <span class="kpi-title">Leak Rate</span>
+                            <span class="kpi-value value-good" id="kpi-leak">0.0%</span>
+                            <span class="kpi-sub">Target: 0% Hard Gate</span>
+                        </div>
+                        <div class="kpi-card">
+                            <span class="kpi-title">Fail-Closed Compliance</span>
+                            <span class="kpi-value value-good" id="kpi-fail-closed">100.0%</span>
+                            <span class="kpi-sub">Target: 100%</span>
+                        </div>
+                        <div class="kpi-card">
+                            <span class="kpi-title">ReBAC Accuracy</span>
+                            <span class="kpi-value value-good" id="kpi-rebac">100.0%</span>
+                            <span class="kpi-sub">Staffing Edge Cases</span>
+                        </div>
+                        <div class="kpi-card">
+                            <span class="kpi-title">Existence Leak Rate</span>
+                            <span class="kpi-value value-good" id="kpi-existence">0.0%</span>
+                            <span class="kpi-sub">Zero Document Confirmation</span>
+                        </div>
+                    </div>
+
+                    <div class="eval-table-container">
+                        <table class="data-table" id="eval-table">
+                            <thead>
+                                <tr>
+                                    <th>Test ID</th>
+                                    <th>Category</th>
+                                    <th>Persona</th>
+                                    <th>Query</th>
+                                    <th>Status</th>
+                                    <th>Answer Snippet</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="6" class="text-center">Click 'Execute Red-Team Suite' to run security verification.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 5: Hash Audit Chain -->
+            <section id="audit" class="tab-content">
+                <div class="card">
+                    <div class="header-action">
+                        <div>
+                            <h3>🔗 Cryptographic Access Audit Log</h3>
+                            <p>Append-only table with SHA-256 hash-chaining verification (`prev_hash` -> `this_hash`).</p>
+                        </div>
+                        <div id="chain-status" class="status-badge">Verifying Chain Integrity...</div>
+                    </div>
+
+                    <div class="eval-table-container">
+                        <table class="data-table" id="audit-table">
+                            <thead>
+                                <tr>
+                                    <th>Log ID</th>
+                                    <th>Timestamp</th>
+                                    <th>User</th>
+                                    <th>Query</th>
+                                    <th>Retrieved / Denied</th>
+                                    <th>Previous Hash</th>
+                                    <th>Current SHA-256 Hash</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="7" class="text-center">Loading audit logs...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
