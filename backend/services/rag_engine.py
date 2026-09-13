@@ -80,10 +80,8 @@ class SentinelRAGEngine:
                 answer = REFUSAL_MESSAGE
             else:
                 # Step 5: Grounded LLM Generation using permitted chunks ONLY
-                used_openai = bool(llm_client.openai_api_key) and llm_client.provider in ("auto", "openai")
-                model_label = "gpt-3.5-turbo" if used_openai else "local-grounded-synthesizer"
                 with trace_span(
-                    "generation", as_type="generation", model=model_label,
+                    "generation", as_type="generation",
                     input={"query": query, "context_chunk_ids": [c["chunk_id"] for c in permitted_chunks]}
                 ) as gen:
                     answer = llm_client.generate_answer(
@@ -92,7 +90,10 @@ class SentinelRAGEngine:
                         user_role=perms.role,
                         user_dept=perms.department
                     )
-                    gen.update(output=answer)
+                    # Read back which provider actually answered instead of
+                    # re-deriving llm_client's OpenAI -> Groq -> local
+                    # precedence a second time here.
+                    gen.update(output=answer, model=llm_client.last_model_used)
 
                 # Step 6: Output guardrails. Groundedness catches both hallucination
                 # and "right permission, wrong document" (a permitted-but-irrelevant

@@ -51,6 +51,12 @@ class Settings(BaseModel):
     GROQ_PROMPT_GUARD_THRESHOLD: float = float(os.getenv("GROQ_PROMPT_GUARD_THRESHOLD", "0.5"))
     # General-purpose reasoning model used as the groundedness judge.
     GROQ_JUDGE_MODEL: str = os.getenv("GROQ_JUDGE_MODEL", "openai/gpt-oss-20b")
+    # Fallback answer-generation model when OPENAI_API_KEY isn't set (see
+    # backend/core/llm_client.py). Deliberately a separate setting from
+    # GROQ_JUDGE_MODEL even though it defaults to the same model -- letting the
+    # generator and the groundedness judge diverge later avoids a model
+    # grading its own homework.
+    GROQ_GENERATION_MODEL: str = os.getenv("GROQ_GENERATION_MODEL", "openai/gpt-oss-20b")
 
     # Observability (backend/core/observability.py). The Langfuse SDK reads
     # these env vars directly (not via this settings object) -- they're

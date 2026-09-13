@@ -10,7 +10,7 @@ from backend.core.observability import trace_span
 logger = logging.getLogger(__name__)
 
 
-def _post_chat_completion(model: str, messages: List[dict], json_mode: bool = False) -> Optional[dict]:
+def _post_chat_completion(model: str, messages: List[dict], json_mode: bool = False, temperature: float = 0) -> Optional[dict]:
     """
     Low-level Groq chat-completions call, traced as a Langfuse generation span
     (a no-op when Langfuse isn't configured). Returns the raw parsed response
@@ -22,7 +22,7 @@ def _post_chat_completion(model: str, messages: List[dict], json_mode: bool = Fa
     if not settings.GROQ_API_KEY:
         return None
 
-    body = {"model": model, "messages": messages, "temperature": 0}
+    body = {"model": model, "messages": messages, "temperature": temperature}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
 
@@ -72,6 +72,21 @@ def call_groq_json(model: str, system_prompt: str, user_prompt: str) -> Optional
 def call_groq_raw(model: str, user_prompt: str) -> Optional[str]:
     """Calls Groq with a single user message and returns the raw text content (no JSON parsing)."""
     data = _post_chat_completion(model, [{"role": "user", "content": user_prompt}])
+    if data is None:
+        return None
+    try:
+        return data["choices"][0]["message"]["content"]
+    except Exception:
+        return None
+
+
+def call_groq_text(model: str, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> Optional[str]:
+    """Calls Groq with a system+user prompt pair and returns the raw text content (no JSON parsing)."""
+    data = _post_chat_completion(
+        model,
+        [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+        temperature=temperature
+    )
     if data is None:
         return None
     try:
