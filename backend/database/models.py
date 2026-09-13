@@ -70,6 +70,7 @@ class AccessAuditLogModel(Base):
     chunks_retrieved = Column(JSON, nullable=False)  # List of chunk IDs returned
     chunks_denied_count = Column(Integer, nullable=False, default=0)
     answer = Column(Text, nullable=False)
+    guardrail_report = Column(JSON, nullable=False, default=dict)  # input_safety/groundedness/pii_leak verdicts
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
     prev_hash = Column(String, nullable=False)
     this_hash = Column(String, nullable=False)

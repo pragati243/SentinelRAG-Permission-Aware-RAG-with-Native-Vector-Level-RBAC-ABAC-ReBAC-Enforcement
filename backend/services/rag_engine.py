@@ -4,6 +4,9 @@ from backend.services.permission_service import PermissionResolver, ResolvedPerm
 from backend.core.vector_store import QdrantVectorStore
 from backend.core.llm_client import llm_client
 from backend.services.audit_service import AuditLogger
+from backend.services.guardrail_service import check_input_safety, check_groundedness, check_pii_leak
+
+REFUSAL_MESSAGE = "I don't have access to information that answers this."
 
 class SentinelRAGEngine:
     def __init__(self, vector_store: QdrantVectorStore):
@@ -11,12 +14,46 @@ class SentinelRAGEngine:
 
     def ask(self, db: Session, user_id: str, query: str, top_k: int = 5) -> Dict[str, Any]:
         """
-        Main execution flow: Permission Resolution -> Filtered ANN Search -> Refusal/Answer -> Hash Audit Log.
+        Main execution flow: Permission Resolution -> Input Guardrail -> Filtered
+        ANN Search -> Refusal/Generation -> Output Guardrails -> Hash Audit Log.
         """
         # Step 1: Resolve Permission Set (Fail-closed fallback on missing/invalid user)
         perms: ResolvedPermissionSet = PermissionResolver.resolve_permissions(db, user_id)
 
-        # Step 2: Execute Filtered ANN Search inside Qdrant
+        guardrail_report: Dict[str, Any] = {}
+
+        # Step 2: Input guardrail (defense-in-depth -- RBAC/ABAC filtering below
+        # is the actual security boundary and holds regardless of this check's
+        # outcome). Uses the SAME refusal text as a permission denial: giving an
+        # attacker a distinct message for "blocked injection attempt" vs. "no
+        # permission" would itself leak which defense fired. The real reason is
+        # only visible internally, in guardrail_report.
+        input_verdict = check_input_safety(query)
+        guardrail_report["input_safety"] = input_verdict.model_dump()
+
+        if input_verdict.flagged:
+            audit_entry = AuditLogger.log_access(
+                db=db,
+                user_id=perms.user_id,
+                query=query,
+                resolved_permissions=perms.model_dump(),
+                chunks_retrieved=[],
+                chunks_denied_count=0,
+                answer=REFUSAL_MESSAGE,
+                guardrail_report=guardrail_report
+            )
+            return {
+                "query": query,
+                "answer": REFUSAL_MESSAGE,
+                "resolved_permissions": perms.model_dump(),
+                "retrieved_chunks": [],
+                "chunks_denied_count": 0,
+                "audit_log_id": audit_entry.log_id,
+                "audit_hash": audit_entry.this_hash,
+                "guardrail_report": guardrail_report
+            }
+
+        # Step 3: Execute Filtered ANN Search inside Qdrant
         permitted_chunks = self.vector_store.search_permissioned(query, perms, top_k=top_k)
 
         # Calculate denied chunks count by comparing with naive search
@@ -24,11 +61,11 @@ class SentinelRAGEngine:
         permitted_chunk_ids = {c["chunk_id"] for c in permitted_chunks}
         chunks_denied_count = sum(1 for c in naive_chunks if c["chunk_id"] not in permitted_chunk_ids)
 
-        # Step 3: Zero-Result Refusal (Zero Existence Confirmation Leak)
+        # Step 4: Zero-Result Refusal (Zero Existence Confirmation Leak)
         if not permitted_chunks:
-            answer = "I don't have access to information that answers this."
+            answer = REFUSAL_MESSAGE
         else:
-            # Step 4: Grounded LLM Generation using permitted chunks ONLY
+            # Step 5: Grounded LLM Generation using permitted chunks ONLY
             answer = llm_client.generate_answer(
                 query=query,
                 context_chunks=permitted_chunks,
@@ -36,7 +73,22 @@ class SentinelRAGEngine:
                 user_dept=perms.department
             )
 
-        # Step 5: Hash-Chained Audit Logging
+            # Step 6: Output guardrails. Groundedness catches both hallucination
+            # and "right permission, wrong document" (a permitted-but-irrelevant
+            # chunk being confidently narrated). PII is a local regex scan, no
+            # LLM call needed.
+            groundedness_verdict = check_groundedness(query, answer, permitted_chunks)
+            guardrail_report["groundedness"] = groundedness_verdict.model_dump()
+            if groundedness_verdict.flagged:
+                answer = REFUSAL_MESSAGE
+
+            if answer != REFUSAL_MESSAGE:
+                pii_verdict = check_pii_leak(answer)
+                guardrail_report["pii_leak"] = pii_verdict.model_dump()
+                if pii_verdict.flagged:
+                    answer = "The generated answer was withheld because it may contain personally identifiable information."
+
+        # Step 7: Hash-Chained Audit Logging
         retrieved_ids = [c["chunk_id"] for c in permitted_chunks]
         audit_entry = AuditLogger.log_access(
             db=db,
@@ -45,7 +97,8 @@ class SentinelRAGEngine:
             resolved_permissions=perms.model_dump(),
             chunks_retrieved=retrieved_ids,
             chunks_denied_count=chunks_denied_count,
-            answer=answer
+            answer=answer,
+            guardrail_report=guardrail_report
         )
 
         return {
@@ -55,7 +108,8 @@ class SentinelRAGEngine:
             "retrieved_chunks": permitted_chunks,
             "chunks_denied_count": chunks_denied_count,
             "audit_log_id": audit_entry.log_id,
-            "audit_hash": audit_entry.this_hash
+            "audit_hash": audit_entry.this_hash,
+            "guardrail_report": guardrail_report
         }
 
     def compare_naive_vs_permissioned(self, db: Session, user_id: str, query: str, top_k: int = 5) -> Dict[str, Any]:

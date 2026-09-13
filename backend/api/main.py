@@ -184,6 +184,7 @@ def get_audit_log(
                 "chunks_retrieved_count": len(l.chunks_retrieved),
                 "chunks_denied_count": l.chunks_denied_count,
                 "answer": l.answer,
+                "guardrail_report": l.guardrail_report,
                 "timestamp": l.timestamp.isoformat(),
                 "prev_hash": l.prev_hash,
                 "this_hash": l.this_hash

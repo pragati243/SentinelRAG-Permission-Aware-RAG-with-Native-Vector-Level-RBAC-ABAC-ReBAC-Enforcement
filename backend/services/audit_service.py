@@ -17,8 +17,19 @@ _chain_lock = threading.Lock()
 
 class AuditLogger:
     @staticmethod
-    def _compute_hash(prev_hash: str, user_id: str, query: str, chunks_retrieved: List[str], answer: str, timestamp_str: str) -> str:
-        data_str = f"{prev_hash}|{user_id}|{query}|{json.dumps(sorted(chunks_retrieved))}|{answer}|{timestamp_str}"
+    def _compute_hash(
+        prev_hash: str,
+        user_id: str,
+        query: str,
+        chunks_retrieved: List[str],
+        answer: str,
+        timestamp_str: str,
+        guardrail_report: Dict[str, Any] = None
+    ) -> str:
+        data_str = (
+            f"{prev_hash}|{user_id}|{query}|{json.dumps(sorted(chunks_retrieved))}|{answer}|"
+            f"{timestamp_str}|{json.dumps(guardrail_report or {}, sort_keys=True)}"
+        )
         return hashlib.sha256(data_str.encode("utf-8")).hexdigest()
 
     @classmethod
@@ -30,11 +41,16 @@ class AuditLogger:
         resolved_permissions: Dict[str, Any],
         chunks_retrieved: List[str],
         chunks_denied_count: int,
-        answer: str
+        answer: str,
+        guardrail_report: Dict[str, Any] = None
     ) -> AccessAuditLogModel:
         """
         Creates an append-only, cryptographic hash-chained audit log entry.
+        guardrail_report (input_safety / groundedness / pii_leak verdicts) is
+        folded into the hash so a tampered guardrail record breaks the chain
+        exactly like a tampered answer or chunk list would.
         """
+        guardrail_report = guardrail_report or {}
         with _chain_lock:
             # Fetch the most recent audit entry to get prev_hash
             last_log = db.query(AccessAuditLogModel).order_by(AccessAuditLogModel.timestamp.desc()).first()
@@ -50,7 +66,8 @@ class AuditLogger:
                 query=query,
                 chunks_retrieved=chunks_retrieved,
                 answer=answer,
-                timestamp_str=now_str
+                timestamp_str=now_str,
+                guardrail_report=guardrail_report
             )
 
             audit_entry = AccessAuditLogModel(
@@ -61,6 +78,7 @@ class AuditLogger:
                 chunks_retrieved=chunks_retrieved,
                 chunks_denied_count=chunks_denied_count,
                 answer=answer,
+                guardrail_report=guardrail_report,
                 timestamp=now,
                 prev_hash=prev_hash,
                 this_hash=this_hash
@@ -97,7 +115,8 @@ class AuditLogger:
                 query=entry.query,
                 chunks_retrieved=entry.chunks_retrieved,
                 answer=entry.answer,
-                timestamp_str=entry.timestamp.isoformat()
+                timestamp_str=entry.timestamp.isoformat(),
+                guardrail_report=entry.guardrail_report
             )
 
             if recomputed != entry.this_hash:
