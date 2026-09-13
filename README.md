@@ -210,15 +210,26 @@ SentinelRAG includes an automated Red-Team evaluation harness (`backend/eval/red
 - **Fail-Closed Compliance**: `100.0%`
 - **ReBAC Staffing Precision**: `100.0%`
 - **Existence Leak Rate**: `0.0%`
+- **Avg. Faithfulness / Answer Relevancy**: LLM-judged, RAGAS-style (see below)
+
+Leak detection uses the **union** of literal substring matching and an LLM-judged
+semantic check (`backend/eval/metrics.py`): the semantic judge catches a
+rephrased leak ("twelve months of pay" instead of "12 months salary
+continuation") that keyword matching alone would miss entirely. Faithfulness
+and answer relevancy scores are likewise LLM-judged, not string-matched,
+giving a real signal on whether an answer is actually grounded in — and
+actually addresses — the permitted context, rather than just "did zero
+forbidden keywords appear."
 
 ```bash
 ==================================================
 🛡️ SENTINEL RAG — RED-TEAM SECURITY EVALUATION
 ==================================================
-Evaluated 12 adversarial test vectors across 5 identity personas.
+Evaluated 11 adversarial test vectors across 5 identity personas.
 Security Gate Status: PASSED
-Data Leakage Rate: 0.0%
+Data Leakage Rate: 0.0% (keyword + semantic judge)
 Fail-Closed Compliance: 100.0%
+Avg. Faithfulness: 1.00 | Avg. Answer Relevancy: 0.97
 ==================================================
 ```
 

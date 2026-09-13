@@ -1,12 +1,11 @@
-import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-import httpx
 from pydantic import BaseModel
 
 from backend.config import settings
+from backend.core.groq_client import call_groq_json, call_groq_raw
 
 logger = logging.getLogger(__name__)
 
@@ -28,41 +27,6 @@ class GuardrailVerdict(BaseModel):
     reason: str
 
 
-def _call_groq_json(model: str, system_prompt: str, user_prompt: str) -> Optional[dict]:
-    """
-    Calls the Groq chat completions endpoint (OpenAI-compatible) against a
-    general chat model and parses a JSON object response. Returns None on ANY
-    failure (missing key, network, auth, parsing) -- callers must treat None as
-    "judge unavailable" and degrade gracefully. This must never be the reason a
-    legitimate request fails; RBAC/ABAC filtering at the vector layer is the
-    actual security boundary and does not depend on this service being up.
-    """
-    if not settings.GROQ_API_KEY:
-        return None
-
-    try:
-        resp = httpx.post(
-            f"{settings.GROQ_BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": 0,
-                "response_format": {"type": "json_object"},
-            },
-            timeout=10.0,
-        )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        return json.loads(content)
-    except Exception:
-        logger.warning("Groq guardrail judge call failed; degrading to unverified.", exc_info=True)
-        return None
-
-
 def check_input_safety(query: str) -> GuardrailVerdict:
     """
     Defense-in-depth input guardrail using Llama Prompt Guard 2, a classifier
@@ -76,24 +40,14 @@ def check_input_safety(query: str) -> GuardrailVerdict:
     no matter what the query says. This check catches attempts to manipulate
     the model's behavior even when the underlying data access is already safe.
     """
-    if not settings.GROQ_API_KEY:
+    raw = call_groq_raw(settings.GROQ_PROMPT_GUARD_MODEL, query)
+    if raw is None:
         return GuardrailVerdict(flagged=False, category="input_safety", reason="judge_unavailable")
 
     try:
-        resp = httpx.post(
-            f"{settings.GROQ_BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
-            json={
-                "model": settings.GROQ_PROMPT_GUARD_MODEL,
-                "messages": [{"role": "user", "content": query}],
-                "temperature": 0,
-            },
-            timeout=10.0,
-        )
-        resp.raise_for_status()
-        score = float(resp.json()["choices"][0]["message"]["content"])
-    except Exception:
-        logger.warning("Prompt-guard call failed; degrading to unverified.", exc_info=True)
+        score = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("Prompt-guard returned a non-numeric score; degrading to unverified.")
         return GuardrailVerdict(flagged=False, category="input_safety", reason="judge_unavailable")
 
     flagged = score >= settings.GROQ_PROMPT_GUARD_THRESHOLD
@@ -131,7 +85,7 @@ def check_groundedness(query: str, answer: str, context_chunks: List[Dict[str, A
     )
     user_prompt = f"QUERY: {query}\n\nCONTEXT:\n{context_str}\n\nANSWER: {answer}"
 
-    result = _call_groq_json(settings.GROQ_JUDGE_MODEL, system_prompt, user_prompt)
+    result = call_groq_json(settings.GROQ_JUDGE_MODEL, system_prompt, user_prompt)
     if result is None:
         return GuardrailVerdict(flagged=False, category="groundedness", reason="judge_unavailable")
 

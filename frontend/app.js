@@ -231,9 +231,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // TAB 4: Red-Team Evaluation
     const runEvalBtn = document.getElementById("run-eval-btn");
 
+    const fmtScore = (v) => (v === null || v === undefined) ? "n/a" : (v < 0 ? "unavailable" : v.toFixed(2));
+
     runEvalBtn.addEventListener("click", async () => {
         runEvalBtn.disabled = true;
-        runEvalBtn.textContent = "Running 12 Red-Team Attacks...";
+        runEvalBtn.textContent = "Running Red-Team Attacks...";
 
         try {
             const res = await fetch("/eval/run", { headers: authHeaders() });
@@ -244,6 +246,8 @@ document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("kpi-fail-closed").textContent = `${s.fail_closed_compliance_percent.toFixed(1)}%`;
             document.getElementById("kpi-rebac").textContent = `${s.rebac_accuracy_percent.toFixed(1)}%`;
             document.getElementById("kpi-existence").textContent = `${s.existence_leak_rate_percent.toFixed(1)}%`;
+            document.getElementById("kpi-faithfulness").textContent = fmtScore(s.avg_faithfulness_score);
+            document.getElementById("kpi-relevancy").textContent = fmtScore(s.avg_answer_relevancy_score);
 
             const tbody = document.querySelector("#eval-table tbody");
             tbody.innerHTML = data.test_details.map(t => `
@@ -253,6 +257,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     <td><code>${t.user_id}</code></td>
                     <td>${t.query}</td>
                     <td><span class="${t.passed ? 'pass-pill' : 'fail-pill'}">${t.passed ? '✅ PASSED' : '❌ FAILED'}</span></td>
+                    <td>${fmtScore(t.faithfulness_score)}</td>
+                    <td>${fmtScore(t.answer_relevancy_score)}</td>
                     <td class="subtitle">${t.answer_snippet}</td>
                 </tr>
             `).join("");

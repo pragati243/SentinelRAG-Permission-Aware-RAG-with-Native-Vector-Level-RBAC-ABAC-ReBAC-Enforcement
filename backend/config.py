@@ -52,4 +52,13 @@ class Settings(BaseModel):
     # General-purpose reasoning model used as the groundedness judge.
     GROQ_JUDGE_MODEL: str = os.getenv("GROQ_JUDGE_MODEL", "openai/gpt-oss-20b")
 
+    # Observability (backend/core/observability.py). The Langfuse SDK reads
+    # these env vars directly (not via this settings object) -- they're
+    # declared here purely for documentation/consistency with the rest of the
+    # config. Tracing is a no-op when the keys are unset -- never a reason a
+    # request fails, same fail-open philosophy as the guardrail judges.
+    LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "")
+    LANGFUSE_BASE_URL: str = os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+
 settings = Settings()

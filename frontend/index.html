@@ -176,6 +176,16 @@
                             <span class="kpi-value value-good" id="kpi-existence">0.0%</span>
                             <span class="kpi-sub">Zero Document Confirmation</span>
                         </div>
+                        <div class="kpi-card">
+                            <span class="kpi-title">Avg. Faithfulness</span>
+                            <span class="kpi-value value-good" id="kpi-faithfulness">--</span>
+                            <span class="kpi-sub">LLM-Judged (RAGAS-style)</span>
+                        </div>
+                        <div class="kpi-card">
+                            <span class="kpi-title">Avg. Answer Relevancy</span>
+                            <span class="kpi-value value-good" id="kpi-relevancy">--</span>
+                            <span class="kpi-sub">LLM-Judged (RAGAS-style)</span>
+                        </div>
                     </div>
 
                     <div class="eval-table-container">
@@ -187,11 +197,13 @@
                                     <th>Persona</th>
                                     <th>Query</th>
                                     <th>Status</th>
+                                    <th>Faithfulness</th>
+                                    <th>Relevancy</th>
                                     <th>Answer Snippet</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr><td colspan="6" class="text-center">Click 'Execute Red-Team Suite' to run security verification.</td></tr>
+                                <tr><td colspan="8" class="text-center">Click 'Execute Red-Team Suite' to run security verification.</td></tr>
                             </tbody>
                         </table>
                     </div>
