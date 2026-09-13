@@ -1,10 +1,19 @@
 import hashlib
 import json
+import threading
 import uuid
 import datetime
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from backend.database.models import AccessAuditLogModel
+
+# Serializes the read-last-hash -> compute -> append critical section so concurrent
+# requests (FastAPI runs sync endpoints in a threadpool) can't both read the same
+# prev_hash and fork the chain. This only guarantees correctness within a single
+# process — a multi-worker deployment needs a DB-native equivalent instead, e.g.
+# Postgres `pg_advisory_xact_lock` or `SELECT ... FOR UPDATE` against a dedicated
+# chain-head row.
+_chain_lock = threading.Lock()
 
 class AuditLogger:
     @staticmethod
@@ -26,39 +35,40 @@ class AuditLogger:
         """
         Creates an append-only, cryptographic hash-chained audit log entry.
         """
-        # Fetch the most recent audit entry to get prev_hash
-        last_log = db.query(AccessAuditLogModel).order_by(AccessAuditLogModel.timestamp.desc()).first()
-        prev_hash = last_log.this_hash if last_log else "GENESIS_HASH_SENTINEL_RAG_0000000000000000"
+        with _chain_lock:
+            # Fetch the most recent audit entry to get prev_hash
+            last_log = db.query(AccessAuditLogModel).order_by(AccessAuditLogModel.timestamp.desc()).first()
+            prev_hash = last_log.this_hash if last_log else "GENESIS_HASH_SENTINEL_RAG_0000000000000000"
 
-        log_id = f"log_{uuid.uuid4().hex[:12]}"
-        now = datetime.datetime.utcnow()
-        now_str = now.isoformat()
+            log_id = f"log_{uuid.uuid4().hex[:12]}"
+            now = datetime.datetime.utcnow()
+            now_str = now.isoformat()
 
-        this_hash = cls._compute_hash(
-            prev_hash=prev_hash,
-            user_id=user_id,
-            query=query,
-            chunks_retrieved=chunks_retrieved,
-            answer=answer,
-            timestamp_str=now_str
-        )
+            this_hash = cls._compute_hash(
+                prev_hash=prev_hash,
+                user_id=user_id,
+                query=query,
+                chunks_retrieved=chunks_retrieved,
+                answer=answer,
+                timestamp_str=now_str
+            )
 
-        audit_entry = AccessAuditLogModel(
-            log_id=log_id,
-            user_id=user_id,
-            query=query,
-            resolved_permission_set=resolved_permissions,
-            chunks_retrieved=chunks_retrieved,
-            chunks_denied_count=chunks_denied_count,
-            answer=answer,
-            timestamp=now,
-            prev_hash=prev_hash,
-            this_hash=this_hash
-        )
+            audit_entry = AccessAuditLogModel(
+                log_id=log_id,
+                user_id=user_id,
+                query=query,
+                resolved_permission_set=resolved_permissions,
+                chunks_retrieved=chunks_retrieved,
+                chunks_denied_count=chunks_denied_count,
+                answer=answer,
+                timestamp=now,
+                prev_hash=prev_hash,
+                this_hash=this_hash
+            )
 
-        db.add(audit_entry)
-        db.commit()
-        db.refresh(audit_entry)
+            db.add(audit_entry)
+            db.commit()
+            db.refresh(audit_entry)
 
         return audit_entry
 

@@ -1,6 +1,28 @@
 document.addEventListener("DOMContentLoaded", () => {
     let usersMap = {};
     let activeUserId = "user_support_01";
+    let activeToken = null;
+
+    // Exchanges a persona's user_id for a signed identity token (demo IdP
+    // simulation — see POST /auth/token). Every authenticated call below sends
+    // this token as a Bearer header instead of a raw, spoofable user_id field.
+    async function loginAs(userId) {
+        const res = await fetch("/auth/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: userId })
+        });
+        if (!res.ok) {
+            throw new Error(`Login failed for ${userId}: ${res.status}`);
+        }
+        const data = await res.json();
+        activeToken = data.access_token;
+        return activeToken;
+    }
+
+    function authHeaders(extra = {}) {
+        return { ...extra, "Authorization": `Bearer ${activeToken}` };
+    }
 
     // Initialize DOM elements
     const personaSelect = document.getElementById("persona-select");
@@ -42,7 +64,8 @@ document.addEventListener("DOMContentLoaded", () => {
     async function updateIdentityBanner(userId) {
         activeUserId = userId;
         try {
-            const res = await fetch(`/debug/resolved-permissions/${userId}`);
+            await loginAs(userId);
+            const res = await fetch(`/debug/resolved-permissions`, { headers: authHeaders() });
             const perms = await res.json();
 
             userNameEl.textContent = perms.user_name;
@@ -109,9 +132,14 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const res = await fetch("/ask", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ user_id: activeUserId, query: query, top_k: 5 })
+                headers: authHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ query: query, top_k: 5 })
             });
+
+            if (res.status === 401) {
+                answerBox.innerHTML = `<p style="color: var(--danger-color);">Session expired or invalid — reselect a persona to re-authenticate.</p>`;
+                return;
+            }
 
             const data = await res.json();
             answerBox.innerHTML = `<p>${data.answer}</p>`;
@@ -152,7 +180,9 @@ document.addEventListener("DOMContentLoaded", () => {
         sbsBtn.textContent = "Analyzing...";
 
         try {
-            const res = await fetch(`/debug/naive-vs-permissioned?user_id=${encodeURIComponent(activeUserId)}&query=${encodeURIComponent(query)}`);
+            const res = await fetch(`/debug/naive-vs-permissioned?query=${encodeURIComponent(query)}`, {
+                headers: authHeaders()
+            });
             const data = await res.json();
 
             // Render Naive
@@ -206,7 +236,7 @@ document.addEventListener("DOMContentLoaded", () => {
         runEvalBtn.textContent = "Running 12 Red-Team Attacks...";
 
         try {
-            const res = await fetch("/eval/run");
+            const res = await fetch("/eval/run", { headers: authHeaders() });
             const data = await res.json();
             const s = data.summary;
 
@@ -237,12 +267,19 @@ document.addEventListener("DOMContentLoaded", () => {
     // TAB 5: Hash Audit Chain
     async function loadAuditLogs() {
         try {
-            const res = await fetch("/audit-log", {
-                headers: { "X-User-Id": "user_vp_ops_01" }
-            });
-            const data = await res.json();
+            const res = await fetch("/audit-log", { headers: authHeaders() });
 
             const statusEl = document.getElementById("chain-status");
+            const tbody = document.querySelector("#audit-table tbody");
+
+            if (res.status === 403) {
+                statusEl.className = "status-badge status-danger";
+                statusEl.textContent = `🔒 Access Denied — ${usersMap[activeUserId]?.role || activeUserId} lacks VP/Security_Auditor role`;
+                tbody.innerHTML = "";
+                return;
+            }
+
+            const data = await res.json();
             if (data.integrity_check.valid) {
                 statusEl.className = "status-badge status-success";
                 statusEl.textContent = "🔒 Cryptographic Chain Validated (SHA-256)";
@@ -251,7 +288,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 statusEl.textContent = "⚠️ TAMPERING DETECTED";
             }
 
-            const tbody = document.querySelector("#audit-table tbody");
             tbody.innerHTML = data.audit_logs.map(l => `
                 <tr>
                     <td><code>${l.log_id}</code></td>

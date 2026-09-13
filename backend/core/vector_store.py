@@ -1,3 +1,4 @@
+import uuid
 from typing import List, Dict, Any, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -43,7 +44,12 @@ class QdrantVectorStore:
 
             points.append(
                 PointStruct(
-                    id=chunk["chunk_id"],
+                    # Qdrant point IDs must be an unsigned int or a UUID; our
+                    # human-readable chunk_id (e.g. "doc_hr_exec_comp_c1") is
+                    # neither, so it's deterministically mapped to a UUID5 here.
+                    # The original chunk_id is preserved in the payload above and
+                    # remains the identifier every retrieval path reads from.
+                    id=str(uuid.uuid5(uuid.NAMESPACE_URL, chunk["chunk_id"])),
                     vector=vector,
                     payload=payload
                 )
@@ -109,12 +115,19 @@ class QdrantVectorStore:
         query_vector = embedding_service.embed_text(query_text)
         qdrant_filter = self.build_qdrant_filter(perms)
 
-        results = self.client.search(
+        results = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=qdrant_filter,
             limit=top_k
-        )
+        ).points
+
+        # The permission filter narrows the CANDIDATE set, but Qdrant still returns
+        # the best `top_k` matches from within it even if none are a good match —
+        # e.g. the one public-tier doc a low-clearance user can see, for a query
+        # about something entirely unrelated. Without this cutoff that reads as a
+        # confident (wrong) answer instead of the correct "no access" refusal.
+        results = [res for res in results if res.score >= settings.MIN_RELEVANCE_SCORE]
 
         return [
             {
@@ -138,11 +151,11 @@ class QdrantVectorStore:
         """
         query_vector = embedding_service.embed_text(query_text)
 
-        results = self.client.search(
+        results = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k
-        )
+        ).points
 
         return [
             {

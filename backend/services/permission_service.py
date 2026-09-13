@@ -1,14 +1,25 @@
 import datetime
+import logging
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from backend.database.models import UserModel, ProjectStaffingModel
 from backend.config import settings
 
+logger = logging.getLogger(__name__)
+
+# Aligned with the documented clearance scheme (README: Level 2 = Internal/Confidential,
+# Level 3 = Restricted, Level 4 = Executive/full access). The previous mapping gated
+# "confidential" behind level 3 and "restricted" behind level 4, which silently
+# contradicted the required_clearance_level values used on the seed corpus (e.g. the
+# HR executive severance doc is tagged sensitivity_tier="restricted" but
+# required_clearance_level=3) — authorized users were being denied their own
+# department's confidential/restricted content because the tier-membership filter
+# and the numeric clearance filter disagreed with each other.
 TIER_MAP = {
     1: ["public"],
-    2: ["public", "internal"],
-    3: ["public", "internal", "confidential"],
+    2: ["public", "internal", "confidential"],
+    3: ["public", "internal", "confidential", "restricted"],
     4: ["public", "internal", "confidential", "restricted"]
 }
 
@@ -76,6 +87,13 @@ class PermissionResolver:
                 allowed_tiers=allowed_tiers,
                 is_fallback=False
             )
-        except Exception as e:
-            # Fail closed on system or query errors
+        except Exception:
+            # Fail closed on system or query errors — but log loudly. A silent
+            # swallow here makes a genuine DB outage indistinguishable from a
+            # malicious probe in telemetry, which is exactly the blind spot an
+            # attacker (or an on-call engineer) would hate to discover later.
+            logger.exception(
+                "Permission resolution failed for user_id=%r; failing closed to public clearance.",
+                user_id
+            )
             return cls.get_fail_closed_permissions(user_id)
